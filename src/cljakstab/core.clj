@@ -1,30 +1,25 @@
 (ns cljakstab.core
-  (:import (org.jakstab Main Options Program)
+  (:import (org.jakstab Main Options Program AnalysisManager)
            (org.jakstab.ssl Architecture)
            (org.jakstab.loader DefaultHarness)
            (org.jakstab.analysis ControlFlowReconstruction)))
 
-(defn foo
-  "I don't do a whole lot."
-  [x]
-  (println x "Hello, World!"))
-
 (defn init-options
   "Jakstab stores options in singleton Options class"
   [opts]
-  (set! org.jakstab.Options/mainFilename (:mainFile opts)))
+  (set! org.jakstab.Options/mainFilename (:mainFile opts))
+  (org.jakstab.AnalysisManager/getInstance))
 
 (defn security-manager-proxy []
   (proxy
       [java.lang.SecurityManager] []
     (checkPermission [perm]
       (if (not (= "setSecurityManager" (.getName ^java.security.Permission perm)))
-        ;(proxy-super checkPermission perm)
         nil))
-    (checkExit [code#]
+    (checkExit [code]
       (throw
        (java.lang.SecurityException.
-        (str "catched exit with code " code#))))))
+        (str "catched exit with code " code))))))
 
 (defmacro disable-system-exit [& exprs]
   `(let [old-mgr# (java.lang.System/getSecurityManager)
