@@ -73,10 +73,8 @@
 
 (defn- edge-flatten
   [edge]
-  (let [[from to] edge
-        from_lbl  (.getLabel from)
-        to_lbl    (.getLabel to)]
-    {from_lbl [to_lbl] to_lbl []}))
+  (let [[from to] edge]
+    {from [to] to []}))
 
 (defn cfg-to-stmt-map
   [cfg]
@@ -106,29 +104,40 @@
   [jumps]
   (if (empty? jumps)
     ""
-    (str ": [" (string/join "," jumps) "]")))
+    (str "-> [" (string/join "," jumps) "]")))
+
+(defn show-abstract-state
+  [cfr location]
+  (str
+   (-> cfr
+    .getReachedStates
+    (.where location))))
 
 (defn show-stmt-map
-  [stmt-map program]
+  [stmt-map program cfr]
   (->>
    stmt-map
    (into (sorted-map))
    (reduce remove-right-after [])
    reverse
    (map
-    (fn [[lbl jumps]]
-      (if (zero? (.getIndex lbl))
-        (let [address (.getAddress lbl)
-              instruction (.getInstruction program address)]
-          (-> program
-              (.getInstructionString address instruction)
-              println)))
-      (println
-       (str
-        lbl
-        " "
-        (.getStatement program lbl))
-       (show-jumps jumps))))
+    (fn [[location jumps]]
+      (let [lbl (.getLabel location)]
+        (if (zero? (.getIndex lbl))
+          (let [address (.getAddress lbl)
+                instruction (.getInstruction program address)]
+            (-> program
+                (.getInstructionString address instruction)
+                println)))
+        (println
+         (str
+          lbl
+          (string/join
+           " "
+           [
+            (.getStatement program lbl)
+            (show-jumps jumps)
+            (show-abstract-state cfr location)]))))))
    dorun)
   nil)
 
@@ -141,11 +150,11 @@
 (defn list-code
   ([] (with-loaded list-code))
   ([loaded]
-    (let [program (:program loaded)]
+    (let [{program :program cfr :cfr} loaded]
       (-> program
           get-cfg
           cfg-to-stmt-map
-          (show-stmt-map program)))))
+          (show-stmt-map program cfr)))))
 
 (defn show-state
   ([state-num] (with-loaded show-state state-num))
