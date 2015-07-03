@@ -1,11 +1,14 @@
 (ns cljakstab.core
-  (:require [clojure.string :as string])
+  (:require [clojure.string :as string]
+            [clojure.walk   :as walk])
   (:import (org.jakstab Main Options Program AnalysisManager)
            (org.jakstab.ssl Architecture)
            (org.jakstab.loader DefaultHarness)
            (org.jakstab.analysis ControlFlowReconstruction)
            java.security.Permission
            java.io.File))
+
+(def ^:private global-loaded-binary nil)
 
 (defn init-options
   "Jakstab stores options in singleton Options class"
@@ -33,7 +36,7 @@
          ~@exprs)
        (finally (System/setSecurityManager old-mgr#)))))
 
-(defn find-jumps
+(defn load-binary
   "find unresolved jumps in specified binary"
   [binary-file]
   (init-options {:mainFile binary-file})
@@ -41,11 +44,15 @@
    (let [arch (Architecture. (.getValue Options/sslFilename))
          program (Program/createProgram arch)
          file (.getAbsoluteFile (File. binary-file))]
+     (-> "--cpa xs" ; s - call stack analysis
+         (string/split #" ")
+         into-array
+         Options/parseOptions)
      (.loadMainModule program file)
      (.installHarness program (DefaultHarness.))
      (let [cfr (ControlFlowReconstruction. program)]
        (.run cfr)
-       {:cfr cfr :program program}))))
+       (def ^:private global-loaded-binary {:cfr cfr :program program})))))
 
 (defn- get-statement
   [program location]
@@ -110,16 +117,55 @@
    reverse
    (map
     (fn [[lbl jumps]]
-      (println lbl (.getStatement program lbl) (show-jumps jumps))))
+      (if (zero? (.getIndex lbl))
+        (let [address (.getAddress lbl)
+              instruction (.getInstruction program address)]
+          (-> program
+              (.getInstructionString address instruction)
+              println)))
+      (println
+       (str
+        lbl
+        " "
+        (.getStatement program lbl))
+       (show-jumps jumps))))
    dorun)
   nil)
 
-(defn show-program
-  [binary-file]
-  (let [program (-> binary-file
-                    find-jumps
-                    :program)]
-    (-> program
-        get-cfg
-        cfg-to-stmt-map
-        (show-stmt-map program))))
+(defn with-loaded
+  [fun & args]
+  (if global-loaded-binary
+    (apply fun global-loaded-binary args)
+    :code-not-loaded))
+
+(defn list-code
+  ([] (with-loaded list-code))
+  ([loaded]
+    (let [program (:program loaded)]
+      (-> program
+          get-cfg
+          cfg-to-stmt-map
+          (show-stmt-map program)))))
+
+(defn show-state
+  ([state-num] (with-loaded show-state state-num))
+  ([loaded state-num]))
+
+(defmacro show-symbols
+  [& forms]
+  `(show-symbols-fn '~forms))
+
+(defn get-symbols-map
+  [loaded]
+  {1 666})
+
+(defn show-symbols-fn
+  ([forms] (with-loaded show-symbols-fn forms))
+  ([loaded forms]
+     (let [symbols (get-symbols-map loaded)]
+       (walk/walk
+        #(if (symbol? %1)
+           (get symbols %1 %1)
+           %1)
+        identity
+        forms))))
