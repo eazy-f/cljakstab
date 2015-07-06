@@ -106,40 +106,56 @@
     ""
     (str "-> [" (string/join "," jumps) "]")))
 
-(defn show-abstract-state
+(defn get-abstract-state
   [cfr location]
   (str
    (-> cfr
     .getReachedStates
     (.where location))))
 
-(defn show-stmt-map
+(defn get-stmt-map
   [stmt-map program cfr]
   (->>
    stmt-map
    (into (sorted-map))
    (reduce remove-right-after [])
    reverse
-   (map
-    (fn [[location jumps]]
-      (let [lbl (.getLabel location)]
-        (if (zero? (.getIndex lbl))
-          (let [address (.getAddress lbl)
-                instruction (.getInstruction program address)]
-            (-> program
-                (.getInstructionString address instruction)
-                println)))
-        (println
-         (str
-          lbl
-          (string/join
-           " "
-           [
-            (.getStatement program lbl)
-            (show-jumps jumps)
-            (show-abstract-state cfr location)]))))))
-   dorun)
-  nil)
+   (transduce
+    (map
+     (fn
+       [[location jumps]]
+       (let [lbl (.getLabel location)]
+         {
+          :label lbl
+          :statement (.getStatement program lbl)
+          :jumps jumps
+          :abstract-state (get-abstract-state cfr location)
+          })))
+    (completing
+     (fn
+       [stmts {lbl :label :as obj}]
+       (if (zero? (.getIndex lbl))
+         (let [address (.getAddress lbl)
+               instruction (.getInstruction program address)
+               instruction-str (.getInstructionString program address instruction)]
+           (conj stmts [instruction-str obj]))
+         (conj (rest stmts) (conj (first stmts) obj)))))
+    [])))
+
+(defn show-stmt-map
+  [stmts]
+  (map
+   (fn [[location obj]]
+     (println location)
+     (println
+      (string/join
+       " "
+       [
+        (str (:label obj))
+        (show-jumps (:jumps obj))
+        (str (:abstract-state obj))])))
+   stmts))
+;          )))
 
 (defn with-loaded
   [fun & args]
@@ -154,7 +170,8 @@
       (-> program
           get-cfg
           cfg-to-stmt-map
-          (show-stmt-map program cfr)))))
+          (get-stmt-map program cfr)
+          show-stmt-map))))
 
 (defn show-state
   ([state-num] (with-loaded show-state state-num))
