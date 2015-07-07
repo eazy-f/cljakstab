@@ -1,6 +1,7 @@
 (ns cljakstab.core
   (:require [clojure.string :as string]
-            [clojure.walk   :as walk])
+            [clojure.walk   :as walk]
+            [clojure.data.json :as json])
   (:import (org.jakstab Main Options Program AnalysisManager)
            (org.jakstab.ssl Architecture)
            (org.jakstab.loader DefaultHarness)
@@ -138,9 +139,37 @@
          (let [address (.getAddress lbl)
                instruction (.getInstruction program address)
                instruction-str (.getInstructionString program address instruction)]
-           (conj stmts [instruction-str obj]))
+           (conj stmts [instruction-str [obj]]))
          (conj (rest stmts) (conj (first stmts) obj)))))
     [])))
+
+(defn export-abstract-state
+  [state]
+  (str state))
+
+(defn export-statement
+  [statement]
+  (into
+   {}
+   (map
+    (fn [[name value]]
+      (let [export-value (case name
+                           (:label :statement) (str value)
+                           (:jumps) (map str value)
+                           (:abstract-state) (export-abstract-state value))]
+        [name export-value]))
+    statement)))
+
+(defn export-asm-instruction
+  [[asm-instruction al-stmts]]
+  {:instruction asm-instruction
+   :statements (map export-statement al-stmts)})
+
+(defn export-stmt-map
+  [stmts]
+  (->> stmts
+       (map export-asm-instruction)
+       json/write-str))
 
 (defn show-stmt-map
   [stmts]
@@ -163,15 +192,18 @@
     (apply fun global-loaded-binary args)
     :code-not-loaded))
 
-(defn list-code
-  ([] (with-loaded list-code))
+(defn get-code
+  ([] (with-loaded get-code))
   ([loaded]
     (let [{program :program cfr :cfr} loaded]
       (-> program
           get-cfg
           cfg-to-stmt-map
-          (get-stmt-map program cfr)
-          show-stmt-map))))
+          (get-stmt-map program cfr)))))
+
+(defn list-code
+  [& args]
+  (show-stmt-map (apply get-code args)))
 
 (defn show-state
   ([state-num] (with-loaded show-state state-num))
