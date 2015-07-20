@@ -97,9 +97,10 @@
   (if
    (empty? prevs)
    (conj prevs cur)
-   (let [[head & tail] prevs
+   (let [head (first prevs)
+         tail (rest prevs)
          [prev-lbl prev-succ] head]
-     (into [cur [prev-lbl (remove #(= (cur 0) %1) prev-succ)]] tail))))
+     (into tail [[prev-lbl (remove #(= (cur 0) %1) prev-succ)] cur]))))
 
 (defn show-jumps
   [jumps]
@@ -119,7 +120,7 @@
   (->>
    stmt-map
    (into (sorted-map))
-   (reduce remove-right-after [])
+   (reduce remove-right-after (list))
    reverse
    (transduce
     (map
@@ -135,13 +136,14 @@
     (completing
      (fn
        [stmts {lbl :label :as obj}]
-       (if (zero? (.getIndex lbl))
+       (if (or (zero? (.getIndex lbl)) (empty? stmts))
          (let [address (.getAddress lbl)
                instruction (.getInstruction program address)
                instruction-str (.getInstructionString program address instruction)]
            (conj stmts [instruction-str [obj]]))
-         (conj (rest stmts) (conj (first stmts) obj)))))
-    [])))
+         (conj (rest stmts) (update (first stmts) 1 #(conj %1 obj))))))
+    (list))
+    reverse))
 
 (defn export-abstract-state
   [state]
