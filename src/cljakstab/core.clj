@@ -1,11 +1,18 @@
 (ns cljakstab.core
   (:require [clojure.string :as string]
             [clojure.walk   :as walk]
-            [clojure.data.json :as json])
+            [clojure.data.json :as json]
+            cljakstab.rat)
   (:import (org.jakstab Main Options Program AnalysisManager)
            (org.jakstab.ssl Architecture)
            (org.jakstab.loader DefaultHarness)
-           (org.jakstab.analysis ControlFlowReconstruction)
+           (org.jakstab.analysis ControlFlowReconstruction
+                                 ConfigurableProgramAnalysis)
+           org.jakstab.analysis.AbstractState
+           org.jakstab.analysis.Precision
+           org.jakstab.analysis.CPAOperators
+           org.jakstab.util.Pair
+           java.util.LinkedList
            java.security.Permission
            java.io.File))
 
@@ -37,6 +44,37 @@
          ~@exprs)
        (finally (System/setSecurityManager old-mgr#)))))
 
+(defrecord EmptyAnalysisState []
+  AbstractState
+  (projectionFromConcretization [& expressions]
+    nil)
+  (lessOrEqual [this lattice-element]
+    (.equals this lattice-element)))
+
+(defrecord EmptyAnalysis []
+  ConfigurableProgramAnalysis
+  (post ^{:doc "having current state return possible successor
+                states for given CFA edge"}
+    [this state edge precision]
+    #{state})
+  (initStartState [this location]
+    (EmptyAnalysisState.))
+  (initPrecision [this location transformer]
+    nil)
+  (prec [this state precision reached]
+    (Pair. state precision))
+  (strengthen ^{:doc "used in composite state analysis
+                      `state` is this analysis state and
+                      `other-states` are states of other analysis
+                      if null is returned state is not touched"}
+    [this state other-states cfa-edge precision]
+    nil)
+  (merge ^{:doc "merge two states which share same location"}
+    [this state1 state2 precision]
+    (CPAOperators/mergeSep state1 state2 precision))
+  (stop [this state reached precision]
+    (CPAOperators/stopSep state reached precision)))
+
 (defn load-binary
   "find unresolved jumps in specified binary"
   [binary-file]
@@ -51,7 +89,8 @@
          Options/parseOptions)
      (.loadMainModule program file)
      (.installHarness program (DefaultHarness.))
-     (let [cfr (ControlFlowReconstruction. program)]
+     (let [cpas (LinkedList. [(cljakstab.rat.RATAnalysis.)])
+           cfr (ControlFlowReconstruction. program cpas)]
        (.run cfr)
        (def ^:private global-loaded-binary {:cfr cfr :program program})))))
 
